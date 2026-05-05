@@ -12,9 +12,9 @@ print("✅ Dataset Loaded Successfully!")
 print(df.head())
 print(df.columns)
 # 🔍 Features (must match app.py)
-X = df[["age", "chol", "trestbps","target"]]
+X = df[["age", "chol", "trestbps"]]
 y = df["target"]
-
+print(df["target"].value_counts())
 # ⚖️ Handle imbalance (IMPORTANT)
 print("\nTarget Distribution:")
 print(y.value_counts())
@@ -32,9 +32,8 @@ X_test = scaler.transform(X_test)
 # 🤖 Train model (improved)
 model = RandomForestClassifier(
     n_estimators=300,
-    max_depth=6,
-    min_samples_split=5,
-    class_weight="balanced",   # 🔥 important fix
+    max_depth=8,
+    class_weight={0:1, 1:1},  # try removing imbalance bias first
     random_state=42
 )
 

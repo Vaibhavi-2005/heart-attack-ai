@@ -7,78 +7,26 @@ import plotly.graph_objects as go
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
 import os
+import numpy as np
 
 # ---------------- PAGE ----------------
 st.set_page_config(page_title="Hospital AI System", layout="wide")
 
-# ---------------- HOSPITAL UI ----------------
+# ---------------- UI ----------------
 st.markdown("""
 <style>
-
-/*  Clean hospital background */
-.stApp {
-    background: #f1f5f9;
-    color: #0f172a;
-}
-
-/* Sidebar */
-section[data-testid="stSidebar"] {
-    background: #0f172a;
-}
-section[data-testid="stSidebar"] * {
-    color: white !important;
-}
-
-/* Header */
-.header {
-    background: white;
-    padding: 20px;
-    border-radius: 12px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-    margin-bottom: 20px;
-}
-
-/* Cards */
-.card {
-    background: white;
-    padding: 18px;
-    border-radius: 12px;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.06);
-    margin-bottom: 15px;
-}
-
-/* KPI */
-.kpi {
-    text-align: center;
-    border-left: 5px solid #3b82f6;
-}
-
-/* Buttons */
-.stButton>button {
-    background: #2563eb;
-    color: white;
-    border-radius: 8px;
-    height: 45px;
-}
-
-/* Risk colors */
-.high {
-    color: #dc2626;
-    font-weight: bold;
-    font-size: 20px;
-}
-.low {
-    color: #16a34a;
-    font-weight: bold;
-    font-size: 20px;
-}
-
+.stApp {background:#f1f5f9;color:#0f172a;}
+section[data-testid="stSidebar"] {background:#0f172a;}
+section[data-testid="stSidebar"] * {color:white !important;}
+.card {background:white;padding:18px;border-radius:12px;
+box-shadow:0 2px 10px rgba(0,0,0,0.06);margin-bottom:15px;}
+.high {color:#16a34a;font-weight:bold;font-size:22px;}
+.low {color:#dc2626;font-weight:bold;font-size:22px;}
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------- HEADER ----------------
 st.markdown("""
-<div class="header">
+<div class="card">
 <h2>🏥 Heart Disease Prediction System</h2>
 <p>AI-powered clinical decision support</p>
 </div>
@@ -91,6 +39,11 @@ option = st.sidebar.radio("Select Mode", ["Manual Entry", "Upload Report"])
 # ---------------- LOAD MODEL ----------------
 model = pickle.load(open("model.pkl", "rb"))
 
+# Load scaler if exists
+scaler = None
+if os.path.exists("scaler.pkl"):
+    scaler = pickle.load(open("scaler.pkl", "rb"))
+
 # ---------------- FUNCTIONS ----------------
 
 def extract_pdf(file):
@@ -100,7 +53,6 @@ def extract_pdf(file):
             if page.extract_text():
                 text += page.extract_text()
     return text
-
 
 def extract_features(text):
     text = text.lower()
@@ -114,14 +66,11 @@ def extract_features(text):
         int(bp.group(1)) if bp else 120
     ]
 
-
 def show_kpi(features):
     col1, col2, col3 = st.columns(3)
-
-    col1.markdown(f"<div class='card kpi'><h4>Age</h4><h2>{features[0]}</h2></div>", unsafe_allow_html=True)
-    col2.markdown(f"<div class='card kpi'><h4>Cholesterol</h4><h2>{features[1]}</h2></div>", unsafe_allow_html=True)
-    col3.markdown(f"<div class='card kpi'><h4>Blood Pressure</h4><h2>{features[2]}</h2></div>", unsafe_allow_html=True)
-
+    col1.markdown(f"<div class='card'><h4>Age</h4><h2>{features[0]}</h2></div>", unsafe_allow_html=True)
+    col2.markdown(f"<div class='card'><h4>Cholesterol</h4><h2>{features[1]}</h2></div>", unsafe_allow_html=True)
+    col3.markdown(f"<div class='card'><h4>Blood Pressure</h4><h2>{features[2]}</h2></div>", unsafe_allow_html=True)
 
 def show_gauge(prob):
     fig = go.Figure(go.Indicator(
@@ -138,44 +87,32 @@ def show_gauge(prob):
             ]
         }
     ))
-    fig.update_layout(paper_bgcolor="white")
     st.plotly_chart(fig, use_container_width=True)
 
-
-# 🔥 NEW GRAPH FUNCTION
-def show_result_graph(features, prob):
-    age, chol, bp = features
-
+def show_graph(features, prob):
     fig = go.Figure()
 
     fig.add_trace(go.Bar(
-        x=["Age", "Cholesterol", "BP"],
-        y=[age, chol, bp],
+        x=["Age", "Chol", "BP"],
+        y=features,
         name="Patient Data"
     ))
 
     fig.add_trace(go.Scatter(
-        x=["Age", "Cholesterol", "BP"],
+        x=["Age", "Chol", "BP"],
         y=[prob/2, prob/1.5, prob],
         mode='lines+markers',
         name="Risk Trend"
     ))
 
-    fig.update_layout(
-        title="📊 Patient Health Analysis",
-        paper_bgcolor="white",
-        plot_bgcolor="white"
-    )
-
     st.plotly_chart(fig, use_container_width=True)
 
-
 def generate_pdf(features, result, prob):
-    file="report.pdf"
-    doc=SimpleDocTemplate(file)
-    styles=getSampleStyleSheet()
+    file = "report.pdf"
+    doc = SimpleDocTemplate(file)
+    styles = getSampleStyleSheet()
 
-    content=[]
+    content = []
     content.append(Paragraph("Heart Disease Report", styles["Title"]))
     content.append(Spacer(1,10))
     content.append(Paragraph(f"Age: {features[0]}", styles["Normal"]))
@@ -188,36 +125,42 @@ def generate_pdf(features, result, prob):
     doc.build(content)
     return file
 
-
+# ---------------- PREDICTION ----------------
 def predict(features):
-    pred = model.predict([features])
-    prob = model.predict_proba([features])[0][1]*100
 
-    st.markdown("<div class='card'><h3>Patient Summary</h3></div>", unsafe_allow_html=True)
-    show_kpi(features)
+    raw_features = np.array(features).reshape(1, -1)   # for UI
 
-    st.markdown("<div class='card'><h3>Diagnosis</h3></div>", unsafe_allow_html=True)
+    scaled_features = raw_features.copy()
 
-    if pred[0] == 1:
-        st.markdown(f"<div class='high'>⚠️ High Risk ({round(prob,2)}%)</div>", unsafe_allow_html=True)
-        result="HIGH RISK"
+    # scale ONLY for model
+    if scaler:
+        scaled_features = scaler.transform(raw_features)
+
+    prediction = model.predict(scaled_features)[0]
+    prob = model.predict_proba(scaled_features)[0][1] * 100
+
+    st.write("Prediction:", prediction)
+    st.write("Probability:", prob)
+
+    # ✅ show RAW values (NO decimals)
+    show_kpi(raw_features[0])
+
+    if prediction == 1:
+        result = "HIGH RISK"
+        st.markdown(f"<div class='high'>⚠️ HIGH RISK ({round(prob,2)}%)</div>", unsafe_allow_html=True)
     else:
-        st.markdown(f"<div class='low'>✅ Low Risk ({round(prob,2)}%)</div>", unsafe_allow_html=True)
-        result="LOW RISK"
+        result = "LOW RISK"
+        st.markdown(f"<div class='low'>✅ LOW RISK ({round(prob,2)}%)</div>", unsafe_allow_html=True)
 
     show_gauge(prob)
+    show_graph(raw_features[0], prob)
 
-    #  GRAPH ADDED HERE
-    show_result_graph(features, prob)
-
-    st.markdown("<div class='card'><h3>Download Report</h3></div>", unsafe_allow_html=True)
-    pdf=generate_pdf(features,result,prob)
-    with open(pdf,"rb") as f:
-        st.download_button("Download Medical Report", f)
-
-
+    pdf = generate_pdf(raw_features[0], result, prob)
+    with open(pdf, "rb") as f:
+        st.download_button("📄 Download Report", f)
 # ---------------- MAIN ----------------
 if option == "Manual Entry":
+
     st.markdown("<div class='card'><h3>Enter Patient Details</h3></div>", unsafe_allow_html=True)
 
     col1, col2, col3 = st.columns(3)
@@ -237,19 +180,9 @@ else:
         features = extract_features(text)
         predict(features)
 
-
-# ---------------- CHAT ----------------
-st.markdown("---")
-st.subheader("🩺 AI Assistant")
-
-q = st.text_input("Ask medical question")
-if st.button("Get Advice"):
-    st.info("Consult a doctor for accurate diagnosis. Maintain healthy lifestyle.")
-
-
 # ---------------- HISTORY ----------------
 st.markdown("---")
-if st.button("View Patient History"):
+if st.button("View History"):
     try:
         st.dataframe(pd.read_csv("history.csv"))
     except:
